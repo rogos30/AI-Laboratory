@@ -1,113 +1,145 @@
 import random
+import time
+from itertools import compress
 
-import numpy as np
 import matplotlib.pyplot as plt
 
-from data import get_data, inspect_data, split_data
-
-data = get_data()
-inspect_data(data)
-
-train_data, test_data = split_data(data)
-
-def calculateMSE(x, y, predictions):
-    MSE = 0
-    for i in range(len(x) - 1):
-        MSE += (y[i] - predictions[i]) ** 2
-    MSE /= len(x)
-    return MSE
+from data import *
 
 
-# Simple Linear Regression
-# predict MPG (y, dependent variable) using Weight (x, independent variable) using closed-form solution
-# y = theta_0 + theta_1 * x - we want to find theta_0 and theta_1 parameters that minimize the prediction error
-
-# We can calculate the error using MSE metric:
-# MSE = SUM (from i=1 to n) (actual_output - predicted_output) ** 2
-
-# get the columns
-y_train = train_data['MPG'].to_numpy()
-x_train = train_data['Weight'].to_numpy()
-
-ones = np.ones((len(x_train)))
-x = np.column_stack((ones, x_train))
-
-y_test = test_data['MPG'].to_numpy()
-x_test = test_data['Weight'].to_numpy()
-ones = np.ones((len(x_test)))
-xTest = np.column_stack((ones, x_test))
-
-# TODO: calculate closed-form solution
-theta_cfs = np.matmul(np.matmul(np.linalg.inv(np.matmul(np.transpose(x), x)), np.transpose(x)), y_train)
-#theta_cfs_test = np.matmul(np.matmul(np.linalg.inv(np.matmul(np.transpose(xTest), xTest)), np.transpose(xTest)), y_test)
-
-predictionsTrain = theta_cfs[0] + theta_cfs[1] * x_test
-#predictionsTest = theta_cfs_test[0] + theta_cfs_test[1] * x_test
-# TODO: calculate error
-#MSEtrain = calculateMSE(x_train, y_train, predictionsTrain)
-MSEtest = calculateMSE(x_test, y_test, predictionsTrain)
-
-#print(MSEtrain)
-print(MSEtest)
-
-# plot the regression line
-x = np.linspace(min(x_test), max(x_test), 100)
-y = float(theta_cfs[0]) + float(theta_cfs[1]) * x
-plt.plot(x, y)
-plt.scatter(x_test, y_test)
-plt.xlabel('Weight')
-plt.ylabel('MPG')
-plt.show()
-
-# TODO: standardization
-avgx = np.average(x_train)
-avgy = np.average(y_train)
-stanDevx = np.std(x_train)
-stanDevy = np.std(y_train)
-x_trainS = (x_train - avgx)/stanDevx
-y_trainS = (y_train - avgy)/stanDevy
-x_testS = (x_test - avgx)/stanDevx
-y_testS = (y_test - avgy)/stanDevy
-ones = np.ones(len(x_trainS))
-xS = np.column_stack((ones, x_trainS))
-ones = np.ones(len(x_testS))
-xOnesS = np.column_stack((ones, x_testS))
-
-# TODO: calculate theta using Batch Gradient Descent
-gradientThetaTrain = np.random.rand(2)
-gradientThetaTest = np.random.rand(2)
+def initial_population(individual_size, population_size):
+    return [[random.choice([True, False]) for _ in range(individual_size)] for _ in range(population_size)]
 
 
-learningRate = 0.001
-for i in range(10000):
-    gradientThetaTrain = gradientThetaTrain - learningRate * 2/len(xS) * np.dot(xS.T, np.dot(xS, gradientThetaTrain) - y_trainS)
-    gradientThetaTest = gradientThetaTest - learningRate * 2/len(xOnesS) * np.dot(xOnesS.T, np.dot(xOnesS, gradientThetaTest) - y_testS)
-
-gradientThetaTrain[1] = gradientThetaTrain[1] * stanDevy / stanDevx
-gradientThetaTrain[0] = avgy - gradientThetaTrain[1] * avgx
-gradientThetaTrain = gradientThetaTrain.reshape(-1)
-gradientThetaTest[1] = gradientThetaTest[1] * stanDevy / stanDevx
-gradientThetaTest[0] = avgy - gradientThetaTest[1] * avgx
-gradientThetaTest = gradientThetaTest.reshape(-1)
-
-predictionsGradientTrain = gradientThetaTrain[0] + gradientThetaTrain[1] * x_test
-#predictionsGradientTest = gradientThetaTest[0] + gradientThetaTest[1] * x_test
+def fitness(items, knapsack_max_capacity, individual):
+    total_weight = sum(compress(items['Weight'], individual))
+    if total_weight > knapsack_max_capacity:
+        return 0
+    return sum(compress(items['Value'], individual))
 
 
+def choice_probability(population, populationFitness):
+    populationChoiceProb = []
+    populationFitnessSum = sum(populationFitness)
+    for i in range(len(population)):
+        populationChoiceProb.append(populationFitness[i] / populationFitnessSum)
+    return populationChoiceProb
 
 
-# TODO: calculate error
-#MSEgradientTrain = calculateMSE(x_train, y_train, predictionsGradientTrain)
-#print(MSEgradientTrain)
-MSEgradientTest = calculateMSE(x_test, y_test, predictionsGradientTrain)
-print(MSEgradientTest)
+def choose_from_population(population, probabilities, selections_required):  # roulette wheel selection
+    selections_made = 0
+    new_population = []
+    index = 0
+    while selections_made < selections_required:
+        if random.random() < probabilities[index]:
+            new_population.append(population[index])
+            selections_made += 1
+        index = (index + 1) % len(probabilities)
+    return new_population
 
 
-# plot the regression line
-x = np.linspace(min(x_test), max(x_test), 100)
-y = float(gradientThetaTrain[0]) + float(gradientThetaTrain[1]) * x
-plt.plot(x, y)
-plt.scatter(x_test, y_test)
-plt.xlabel('Weight')
-plt.ylabel('MPG')
+def crossover(population):
+    modified_population = []
+    for i in range (0, len(population), 2):
+        member = population[i]
+        secondMember = population[i+1]
+        firstHalf = member[:len(member)//2]
+        secondHalf = secondMember[len(member)//2:]
+        newMember = firstHalf + secondHalf
+        modified_population.append(newMember)
+        firstHalf = secondMember[:len(member)//2]
+        secondHalf = member[len(member)//2:]
+        newMember = firstHalf + secondHalf
+        modified_population.append(newMember)
+    return modified_population
+
+
+def mutation(population):
+    for i in range(len(population)):
+        member = population[i]
+        gene = random.randrange(len(member))
+        member[gene] = not member[gene]
+
+
+def sort_population(population, population_fitness):
+    for i in range(len(population)):
+        for j in range(len(population)-1):
+            if population_fitness[j] > population_fitness[j+1]:
+                population[j], population[j+1] = population[j+1], population[j]
+                population_fitness[j], population_fitness[j+1] = population_fitness[j+1], population_fitness[j]
+
+
+def update_population(population, population_fitness, new_population):
+    sort_population(population, population_fitness)
+    populationCopy = population.copy()
+    for i in range(n_selection):
+        populationCopy[i] = new_population[i]
+    return populationCopy
+
+
+def population_best(items, knapsack_max_capacity, population):
+    best_individual = None
+    best_individual_fitness = -1
+    for individual in population:
+        individual_fitness = fitness(items, knapsack_max_capacity, individual)
+        if individual_fitness > best_individual_fitness:
+            best_individual = individual
+            best_individual_fitness = individual_fitness
+    return best_individual, best_individual_fitness
+
+
+items, knapsack_max_capacity = get_big()
+print(items)
+
+population_size = 100
+generations = 2000
+n_selection = 20
+n_elite = 1
+
+start_time = time.time()
+best_solution = None
+best_fitness = 0
+population_history = []
+best_history = []
+population = initial_population(len(items), population_size)
+for _ in range(generations):
+    population_history.append(population)
+
+    # TODO: implement genetic algorithm
+    populationFitness = []
+    for i in range(len(population)):
+        populationFitness.append(fitness(items, knapsack_max_capacity, population[i]))
+
+    populationChoiceProbability = choice_probability(population, populationFitness)
+    chosenOnes = choose_from_population(population, populationChoiceProbability, n_selection)
+    modifiedOnes = crossover(chosenOnes)
+    mutation(modifiedOnes)
+    population = update_population(population, populationFitness, modifiedOnes)
+
+    best_individual, best_individual_fitness = population_best(items, knapsack_max_capacity, population)
+    if best_individual_fitness > best_fitness:
+        best_solution = best_individual
+        best_fitness = best_individual_fitness
+    best_history.append(best_fitness)
+
+end_time = time.time()
+total_time = end_time - start_time
+print('Best solution:', list(compress(items['Name'], best_solution)))
+print('Best solution value:', best_fitness)
+print('Time: ', total_time)
+
+# plot generations
+x = []
+y = []
+top_best = 10
+for i, population in enumerate(population_history):
+    plotted_individuals = min(len(population), top_best)
+    x.extend([i] * plotted_individuals)
+    population_fitnesses = [fitness(items, knapsack_max_capacity, individual) for individual in population]
+    population_fitnesses.sort(reverse=True)
+    y.extend(population_fitnesses[:plotted_individuals])
+plt.scatter(x, y, marker='.')
+plt.plot(best_history, 'r')
+plt.xlabel('Generation')
+plt.ylabel('Fitness')
 plt.show()
